@@ -71,6 +71,12 @@ class WindowMover {
         this._updateAppData();
     }
 
+    _activateWorkspace(workspaceNum) {
+        let workspaceManager = global.workspace_manager;
+        let metaWorkspace = workspaceManager.get_workspace_by_index(workspaceNum);
+        metaWorkspace.activate(global.get_current_time());
+    }
+
     _moveWindow(window, workspaceNum) {
         if (window.skip_taskbar || window.is_on_all_workspaces())
             return;
@@ -100,6 +106,7 @@ class WindowMover {
         let workspaceNum = this._appConfigs.get(app.id);
         windows.filter(w => !data.windows.includes(w)).forEach(window => {
             this._moveWindow(window, workspaceNum);
+            this._activateWorkspace(workspaceNum);
         });
         data.windows = windows;
     }
