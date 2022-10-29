@@ -7,6 +7,9 @@ const {Shell} = imports.gi;
 const ExtensionUtils = imports.misc.extensionUtils;
 const Main = imports.ui.main;
 
+const WORKSPACE_ACTIVATION_SUSPENSION_TRIGGER = 1000;
+const WORKSPACE_ACTIVATION_SUSPENSION_TIMEOUT = 2000;
+
 class WindowMover {
     constructor() {
         this._settings = ExtensionUtils.getSettings();
@@ -20,6 +23,14 @@ class WindowMover {
 
         this._settings.connect('changed', this._updateAppConfigs.bind(this));
         this._updateAppConfigs();
+
+        this._lastAppStart = 0;
+        this._suspendWorkspaceActivationUntil = 0;
+
+        this._appsStateChangedId =
+            this._appSystem.connect('app-state-changed',
+                this._appStateChanged.bind(this));
+
     }
 
     _updateAppConfigs() {
@@ -45,12 +56,14 @@ class WindowMover {
         let addedApps = ids
             .map(id => this._appSystem.lookup_app(id))
             .filter(app => app && !this._appData.has(app));
+
         addedApps.forEach(app => {
             let data = {
                 windowsChangedId: app.connect('windows-changed',
                     this._appWindowsChanged.bind(this)),
                 moveWindowsId: 0,
                 windows: app.get_windows(),
+                state: app.state,
             };
             this._appData.set(app, data);
         });
@@ -62,6 +75,11 @@ class WindowMover {
             this._appsChangedId = 0;
         }
 
+        if (this._appsStateChangedId) {
+            this._appSystem.disconnect(this._appsStateChangedId);
+            this._appsStateChangedId = 0;
+        }
+
         if (this._settings) {
             this._settings.run_dispose();
             this._settings = null;
@@ -69,6 +87,45 @@ class WindowMover {
 
         this._appConfigs.clear();
         this._updateAppData();
+    }
+
+    _listNewWindows(knownWindows, allWindows) {
+        return allWindows.filter(w => !knownWindows.includes(w));
+    }
+
+    _hasNewWindows(app) {
+        let data = this._appData.get(app);
+
+        let newWindows = this._listNewWindows(data.windows, app.get_windows());
+
+        return newWindows.length > 0;
+    }
+
+
+    _appStateChanged(appSystem, app) {
+        let data = this._appData.get(app);
+
+        if (!data) {
+            return;
+        }
+
+        if (
+            (
+                data.state === Shell.AppState.STOPPED ||
+                this._hasNewWindows(app)
+            ) &&
+            app.state !== Shell.AppState.STOPPED
+        ) {
+            let appStartInterval = Date.now() - this._lastAppStart;
+            this._lastAppStart = Date.now();
+
+            if (appStartInterval < WORKSPACE_ACTIVATION_SUSPENSION_TRIGGER) {
+                    this._suspendWorkspaceActivationUntil =
+                        Date.now() + WORKSPACE_ACTIVATION_SUSPENSION_TIMEOUT;
+            }
+        }
+
+        data.state = app.state;
     }
 
     _activateWorkspace(workspaceNum) {
@@ -104,10 +161,19 @@ class WindowMover {
         }));
 
         let workspaceNum = this._appConfigs.get(app.id);
-        windows.filter(w => !data.windows.includes(w)).forEach(window => {
+
+        let newWindows = this._listNewWindows(data.windows, windows);
+        newWindows.forEach(window => {
             this._moveWindow(window, workspaceNum);
-            this._activateWorkspace(workspaceNum);
         });
+
+        if (
+            newWindows.length &&
+            Date.now() > this._suspendWorkspaceActivationUntil
+        ) {
+            this._activateWorkspace(workspaceNum);
+        }
+
         data.windows = windows;
     }
 }
