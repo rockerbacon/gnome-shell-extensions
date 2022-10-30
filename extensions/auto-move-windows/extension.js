@@ -24,6 +24,7 @@ class WindowMover {
         this._settings.connect('changed', this._updateAppConfigs.bind(this));
         this._updateAppConfigs();
 
+        this._lastStartedAppId = null;
         this._lastAppStart = 0;
         this._suspendWorkspaceActivationUntil = 0;
 
@@ -114,8 +115,11 @@ class WindowMover {
                 data.state === Shell.AppState.STOPPED ||
                 this._hasNewWindows(app)
             ) &&
-            app.state !== Shell.AppState.STOPPED
+            app.state !== Shell.AppState.STOPPED &&
+            this._lastStartedAppId !== app.get_id()
         ) {
+            this._lastStartedAppId = app.get_id();
+
             let appStartInterval = Date.now() - this._lastAppStart;
             this._lastAppStart = Date.now();
 
